@@ -7,10 +7,13 @@
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 #endif
+using System;
 using System.Diagnostics;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 /*
 Copyright (c) 2015 Matt Schoen
 
@@ -43,6 +46,19 @@ public class JSONObject {
 	const string INFINITY = "\"INFINITY\"";
 	const string NEGINFINITY = "\"NEGINFINITY\"";
 	const string NaN = "\"NaN\"";
+
+	private static Dictionary<string, string> escapes = new Dictionary<string, string>() {
+		// Single slashes must be escaped first, to avoid doubling slashes we insert
+		{"\\", "\\\\"}, // \ => \\
+		{"\"", "\\\""}, // " => \"
+		{"/", "\\/"},   // / => \/
+		{"\b", "\\b"},  // <backspace>       => \b
+		{"\f", "\\f"},  // <form-feed>       => \f
+		{"\n", "\\n"},  // <newline>         => \n
+		{"\r", "\\r"},  // <carriage-return> => \r
+		{"\t", "\\t"},  // <tab>             => \t
+	};
+
 	public static readonly char[] WHITESPACE = { ' ', '\r', '\n', '\t', '\uFEFF', '\u0009' };
 	public enum Type { NULL, STRING, NUMBER, OBJECT, ARRAY, BOOL, BAKED }
 	public bool isContainer { get { return (type == Type.ARRAY || type == Type.OBJECT); } }
@@ -268,6 +284,30 @@ public class JSONObject {
 	public JSONObject(string str, int maxDepth = -2, bool storeExcessLevels = false, bool strict = false) {	//create a new JSONObject from a string (this will also create any children, and parse the whole string)
 		Parse(str, maxDepth, storeExcessLevels, strict);
 	}
+
+	string Escape(string str) {
+		foreach (var escape in escapes) {
+			str = str.Replace(escape.Key, escape.Value);
+		}
+
+		return str;
+	}
+
+	string Unescape(string str) {
+		foreach (var escape in escapes) {
+			str = str.Replace(escape.Value, escape.Key);
+		}
+
+		var regex = new Regex(@"\\[uU]([0-9A-F]{4})");
+		str = regex.Replace(str, match => {
+			var val = match.Value.Substring(2); // trim off "\u"
+			var c = (char)Int32.Parse(val, NumberStyles.HexNumber); // create character at code point
+			return c.ToString(); // replace match with unicode character
+		});
+
+		return str;
+	}
+
 	void Parse(string str, int maxDepth = -2, bool storeExcessLevels = false, bool strict = false) {
 		if(!string.IsNullOrEmpty(str)) {
 			str = str.Trim(WHITESPACE);
@@ -326,7 +366,7 @@ public class JSONObject {
 #endif
 				} else if(str[0] == '"') {
 					type = Type.STRING;
-					this.str = str.Substring(1, str.Length - 2);
+					this.str = Unescape(str.Substring(1, str.Length - 2));
 				} else {
 					int tokenTmp = 1;
 					/*
@@ -912,7 +952,7 @@ public class JSONObject {
 				builder.Append(str);
 				break;
 			case Type.STRING:
-				builder.AppendFormat("\"{0}\"", str);
+				builder.AppendFormat("\"{0}\"", Escape(str));
 				break;
 			case Type.NUMBER:
 				if(useInt) {
